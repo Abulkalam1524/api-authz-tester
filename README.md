@@ -38,6 +38,79 @@ It targets the two most common API flaws in the
 `BYPASSED` results are **candidates**. Confirm every one manually before
 reporting it. The tool narrows the search; it does not replace the tester.
 
+## Architecture
+
+Each file in `src/api_authz_tester/` has one job. The numbers show the order
+of one run.
+
+```mermaid
+flowchart TD
+    subgraph S1["1. Start"]
+        CLI["💻 Command line<br/>cli.py<br/>api-authz-tester list / run"]
+    end
+
+    subgraph S2["2. Prepare"]
+        CFG["📄 Read the config<br/>config.py<br/>env variables + checks"]
+        SPEC["🗺️ Read the endpoints<br/>spec.py<br/>OpenAPI spec + scope"]
+    end
+
+    subgraph S3["3. Replay as each identity"]
+        ENG["🧠 Choose owner and attackers<br/>engine.py"]
+        AUTH["🔑 Log in, re-login on 401<br/>auth.py"]
+        HTTP["🌐 Send the request<br/>http.py<br/>rate limit, no redirects"]
+    end
+
+    API[("🎯 Target API<br/>localhost unless --i-am-authorized")]
+
+    subgraph S4["4. Judge"]
+        CMP["🔍 Compare with the owner<br/>compare.py<br/>verdict + OWASP label"]
+    end
+
+    subgraph S5["5. Report"]
+        REP["📝 Write the report<br/>report.py<br/>secrets redacted"]
+        OUT["report.md · report.json · console summary"]
+    end
+
+    CLI -->|"1. load config"| CFG
+    CFG -->|"2. find spec"| SPEC
+    SPEC -->|"3. operations in scope"| ENG
+    ENG -->|"4. send as a user"| AUTH
+    AUTH -->|"5. add token"| HTTP
+    HTTP <-->|"6. request / response"| API
+    HTTP -->|"7. owner and attacker responses"| CMP
+    CMP -->|"8. verdicts"| REP
+    REP -->|"9. write"| OUT
+
+    classDef start fill:#2563eb,stroke:#1e40af,color:#ffffff
+    classDef step fill:#0891b2,stroke:#0e7490,color:#ffffff
+    classDef target fill:#dc2626,stroke:#991b1b,color:#ffffff
+    classDef output fill:#16a34a,stroke:#166534,color:#ffffff
+    class CLI start
+    class CFG,SPEC,ENG,AUTH,HTTP,CMP,REP step
+    class API target
+    class OUT output
+```
+
+| File | Job |
+|---|---|
+| `cli.py` | Reads the command, applies the safety checks, starts everything, sets the exit code |
+| `config.py` | Loads the YAML config, fills `${VAR}` from the environment, checks every field |
+| `spec.py` | Reads the OpenAPI spec and keeps the endpoints in scope |
+| `engine.py` | Picks the owner and the attackers for each request and collects the results |
+| `auth.py` | Logs in once per identity, keeps the token, logs in again once on a 401 |
+| `http.py` | Sends requests: one session per identity, rate limit, timeout, no redirects |
+| `compare.py` | Compares owner and attacker responses and gives the verdict and OWASP label |
+| `report.py` | Writes the Markdown and JSON reports and redacts secrets |
+
+Design choices:
+
+- **Small modules, one job each.** Every part can be tested on its own.
+- **Safe by default.** Read-only methods, localhost only, rate-limited, secrets redacted.
+- **No hidden bugs from expired tokens.** A 401 triggers one re-login and retry, so
+  an expired token is not reported as `ENFORCED`.
+- **Offline tests.** 99 pytest tests run against a fake vulnerable API on
+  `127.0.0.1`, including an end-to-end check of every verdict.
+
 ## Safety
 
 - Only test systems you own or are **authorized** to test.
