@@ -80,9 +80,8 @@ dependencies.
 ## CI config (ci/vampi/vampi-ci.yml)
 
 - `base_url: http://localhost:5000`
-- `spec`: the spec **served by the running container** (Connexion 2 serves
-  it at `/openapi.json`), so the spec always matches the image. If that path
-  does not work, use the raw GitHub URL pinned to the same commit as the image.
+- `spec`: the spec **served by the running container** at `/openapi.json`
+  (checked: it works), so the spec always matches the image.
 - Identities: alice (`name1`, privilege 1, owns `username: name1`,
   `book_title: alice-secret-book`), bob (`name2`, privilege 1, owns
   `username: name2`, `book_title: bob-secret-book`), admin (privilege 2, owns
@@ -105,9 +104,11 @@ list and `/me`), so the example works for a user running VAmPI by hand.
    - vulnerable: `vulnerable=1`, `tokentimetolive=5`
    - secure: `vulnerable=0`, `tokentimetolive=3600`
 3. `pip install -e .`, then run `python ci/vampi/setup_vampi.py`.
-4. Run the tool. Vulnerable mode uses `--rate 2`, so the run lasts longer than
+4. Run the tool. Vulnerable mode uses `--rate 1`, so the run lasts longer than
    5 seconds and tokens expire during it:
-   `api-authz-tester run -c ci/vampi/vampi-ci.yml -o report.md --json report.json --rate 2`
+   `api-authz-tester run -c ci/vampi/vampi-ci.yml -o report.md --json report.json --rate 1`
+   (Checked locally: the run took 23 s, the tool logged in again 3 times, and
+   the verdicts were the same as with 60 s tokens.)
 5. Check the exit code: it must be **1** in both modes (`/users/v1/_debug` is
    BYPASSED even in secure mode). Any other code fails the job.
 6. Run `python ci/vampi/check_report.py report.json ci/vampi/expected-<mode>.json`.
@@ -131,12 +132,13 @@ and this avoids setting up GitHub Secrets. The config still reads them with
 - Tests in `tests/test_check_report.py` use small JSON samples only (no
   network): match, different verdict, missing cell, extra cell.
 
-## Expected verdicts (to confirm on the first real run)
+## Expected verdicts
 
-These come from reading VAmPI's source. **Do not trust them blindly.** Run the
-workflow once, compare, and look at every difference by hand (`curl` against
-the container in the CI log, or reasoning from VAmPI's source). Then write the
-final expected files. Explain every change from this table in the PR.
+First predicted from VAmPI's source, then **confirmed by a local run** of
+VAmPI (from source at commit `f16052d`, both modes) with the session 1 tool.
+CI uses the Docker image, which may differ. If the first CI run gives a
+different result, look at it by hand before changing the expected files, and
+explain every change from this table in the PR.
 
 | Request | Attacker | vulnerable=1 | vulnerable=0 |
 |---|---|---|---|
@@ -146,16 +148,22 @@ final expected files. Explain every change from this table in the PR.
 | | anonymous | ENFORCED (401) | ENFORCED (401) |
 | `GET /users/v1/_debug` (owner admin) | alice, bob | BYPASSED (BFLA) | BYPASSED (BFLA) |
 | | anonymous | BYPASSED (Missing authentication) | BYPASSED (Missing authentication) |
-| `GET /me` (owner admin) | alice, bob | REVIEW (uncertain, see below) | REVIEW |
+| `GET /me` (owner admin) | alice, bob | REVIEW (similarity 0.89, see below) | REVIEW (0.89) |
 | | anonymous | ENFORCED (401) | ENFORCED (401) |
 | `GET /users/v1`, `GET /books/v1`, `GET /users/v1/{username}` | all | SKIPPED (public) | SKIPPED (public) |
 
-**Uncertain:** the `/me` answers for admin and for name1 are short JSON with
-the same keys. Their similarity may be close to 0.9. If it is 0.9 or more,
-the tool says BYPASSED (BFLA), which would be a false positive. If this
-happens, do not change the threshold just to hide it. Record it as a known
-false positive in the README and in `docs/vampi-results.md`, and list "better
-similarity for short responses" under "Out of scope / next".
+**Fragile:** the `/me` answers for admin and name1 are short JSON with the
+same keys. Their similarity is **0.89**, just under the 0.9 threshold. So it
+is REVIEW today, but a small change (a longer email, another field) could make
+it BYPASSED (BFLA), a false positive. Do not change the threshold to hide
+anything. Write this down in `docs/vampi-results.md` as a known weakness, and
+list "better similarity for short responses" under "Out of scope / next".
+
+**Redaction note:** VAmPI's book response has a field named `secret`, so the
+report shows it as `[REDACTED]`. The evidence for the BOLA (the other user's
+secret) is therefore hidden in the report. This is the redaction rule working
+as designed. Mention it in `docs/vampi-results.md`; the curl command lets a
+human see the real value.
 
 ## Tool changes
 
