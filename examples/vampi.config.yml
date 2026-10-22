@@ -1,0 +1,65 @@
+# Example config for VAmPI (https://github.com/erev0s/VAmPI), a deliberately
+# vulnerable API. Run it locally first:
+#   docker run -d -p 5000:5000 -e vulnerable=1 erev0s/vampi:latest
+#   curl http://localhost:5000/createdb
+#
+# Then, as each user, create a book with a known title (POST /books/v1)
+# so every identity "owns" something the others should not be able to read.
+#
+# ${VAR} values are read from environment variables, so passwords and
+# tokens never end up in this file. Copy it to my.config.yml (gitignored).
+
+target:
+  base_url: http://localhost:5000
+  spec: https://raw.githubusercontent.com/erev0s/VAmPI/master/openapi_specs/openapi3.yml
+  rate_limit: 5          # max requests per second
+  timeout: 10            # seconds per request
+  similarity: 0.9        # response similarity that counts as "same data"
+
+scope:
+  include: ["/users/v1*", "/books/v1*"]
+  exclude: ["/createdb"]
+  methods: [GET]         # safe default; state-changing methods need --allow-unsafe
+
+identities:
+  - name: alice
+    privilege: 1         # 0 = anonymous, 1 = normal user, 2 = admin
+    login:
+      method: POST
+      path: /users/v1/login
+      json: { username: name1, password: "${VAMPI_USER1_PASS}" }
+      token_from: auth_token
+      header: Authorization
+      format: "Bearer {token}"
+    owns:                # path-parameter values that belong to this identity
+      username: name1
+      book_title: alice-secret-book
+
+  - name: bob
+    privilege: 1
+    login:
+      method: POST
+      path: /users/v1/login
+      json: { username: name2, password: "${VAMPI_USER2_PASS}" }
+      token_from: auth_token
+      header: Authorization
+      format: "Bearer {token}"
+    owns:
+      username: name2
+      book_title: bob-secret-book
+
+  - name: admin
+    privilege: 2
+    login:
+      method: POST
+      path: /users/v1/login
+      json: { username: admin, password: "${VAMPI_ADMIN_PASS}" }
+      token_from: auth_token
+      header: Authorization
+      format: "Bearer {token}"
+    owns:
+      username: admin
+
+  - name: anonymous
+    privilege: 0
+    headers: {}

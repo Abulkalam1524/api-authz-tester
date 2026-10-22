@@ -1,0 +1,29 @@
+[project]
+name = "api-authz-tester"
+version = "0.1.0"
+description = "Multi-identity authorization tester for REST APIs (BOLA / BFLA / missing auth)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Abul Kalam Azad" }]
+dependencies = [
+    "requests>=2.31",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+api-authz-tester = "api_authz_tester.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
