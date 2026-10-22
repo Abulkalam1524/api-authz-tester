@@ -1,0 +1,62 @@
+openapi: 3.0.3
+info:
+  title: Fake vulnerable API (tests only)
+  version: "1.0"
+paths:
+  /login:
+    post:
+      summary: Log in and get a token
+      requestBody:
+        content:
+          application/json:
+            example: { username: alice, password: example }
+      responses:
+        "200": { description: "{token}" }
+  /users/{username}:
+    parameters:
+      - $ref: "#/components/parameters/username"
+    get:
+      summary: Read a user profile (that user or admin only)
+      responses:
+        "200": { description: profile }
+  /notes/{note_id}:
+    parameters:
+      - name: note_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Read a note
+      responses:
+        "200": { description: note }
+    delete:
+      summary: Delete a note
+      responses:
+        "204": { description: deleted }
+  /admin/stats:
+    get:
+      summary: Admin statistics
+      responses:
+        "200": { description: stats }
+  /debug/config:
+    get:
+      summary: Debug configuration
+      responses:
+        "200": { description: config }
+  /public:
+    get:
+      summary: Public welcome message
+      responses:
+        "200": { description: welcome }
+  /me:
+    get:
+      summary: The caller's own profile
+      responses:
+        "200": { description: profile }
+components:
+  parameters:
+    username:
+      name: username
+      in: path
+      required: true
+      schema: { type: string }
