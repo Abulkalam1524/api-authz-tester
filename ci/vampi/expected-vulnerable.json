@@ -1,0 +1,65 @@
+{
+  "description": "VAmPI with vulnerable=1: any logged-in user can read any book (BOLA).",
+  "cells": [
+    {
+      "request": "GET /books/v1/alice-secret-book",
+      "identity": "bob",
+      "verdict": "BYPASSED",
+      "label": "BOLA"
+    },
+    {
+      "request": "GET /books/v1/alice-secret-book",
+      "identity": "anonymous",
+      "verdict": "ENFORCED"
+    },
+    {
+      "request": "GET /books/v1/bob-secret-book",
+      "identity": "alice",
+      "verdict": "BYPASSED",
+      "label": "BOLA"
+    },
+    {
+      "request": "GET /books/v1/bob-secret-book",
+      "identity": "anonymous",
+      "verdict": "ENFORCED"
+    },
+    {
+      "request": "GET /users/v1/_debug",
+      "identity": "alice",
+      "verdict": "BYPASSED",
+      "label": "BFLA"
+    },
+    {
+      "request": "GET /users/v1/_debug",
+      "identity": "bob",
+      "verdict": "BYPASSED",
+      "label": "BFLA"
+    },
+    {
+      "request": "GET /users/v1/_debug",
+      "identity": "anonymous",
+      "verdict": "BYPASSED",
+      "label": "Missing authentication"
+    },
+    {
+      "request": "GET /me",
+      "identity": "alice",
+      "verdict": "REVIEW"
+    },
+    {
+      "request": "GET /me",
+      "identity": "bob",
+      "verdict": "REVIEW"
+    },
+    {
+      "request": "GET /me",
+      "identity": "anonymous",
+      "verdict": "ENFORCED"
+    }
+  ],
+  "skipped": [
+    "GET /books/v1",
+    "GET /users/v1",
+    "GET /users/v1/{username}"
+  ]
+}

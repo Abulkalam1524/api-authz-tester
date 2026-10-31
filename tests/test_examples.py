@@ -12,8 +12,9 @@ def test_vampi_example_loads(monkeypatch):
     config = load_config(EXAMPLE)  # loading never fetches the spec URL
 
     assert config.target.base_url == "http://localhost:5000"
-    assert config.target.spec.startswith("https://")
+    assert config.target.spec == "http://localhost:5000/openapi.json"
     assert config.scope.methods == ["GET"]
+    assert config.scope.public == ["/users/v1", "/books/v1", "/users/v1/{username}"]
     assert [(i.name, i.privilege) for i in config.identities] == [
         ("alice", 1),
         ("bob", 1),

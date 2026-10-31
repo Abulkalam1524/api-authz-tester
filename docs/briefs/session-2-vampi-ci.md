@@ -89,8 +89,8 @@ dependencies.
 - Scope: `include: ["/users/v1*", "/books/v1*", "/me"]`, `exclude:
   ["/createdb"]`, `methods: [GET]`.
 - **Decision:** `public: ["/users/v1", "/books/v1", "/users/v1/{username}"]`.
-  These answer anyone on purpose. Without this, the tool reports about 7
-  BYPASSED results that are not real bugs. The README must say this openly.
+  These answer anyone on purpose. Without this, the tool reports 13
+  BYPASSED results that are not real bugs (measured against secure VAmPI). The README must say this openly.
   (`/users/v1/_debug` is not matched by these patterns, so it is still tested.)
 
 Also update `examples/vampi.config.yml` to match what was learned (the public

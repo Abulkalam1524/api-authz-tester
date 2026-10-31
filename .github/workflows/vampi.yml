@@ -1,0 +1,82 @@
+name: vampi
+
+# Runs api-authz-tester against VAmPI (https://github.com/erev0s/VAmPI), a
+# deliberately vulnerable API, in two modes, and checks every verdict:
+#   vulnerable: the tool must find the real bugs
+#   secure:     the same checks must come back ENFORCED (no false alarms)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  vampi:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Tokens live 5 s and the tool sends 1 request/s, so tokens expire
+          # during the run. The bugs must still be found (re-login on 401).
+          - mode: vulnerable
+            vulnerable: "1"
+            token_ttl: "5"
+            rate: "1"
+          - mode: secure
+            vulnerable: "0"
+            token_ttl: "3600"
+            rate: "5"
+
+    services:
+      vampi:
+        # erev0s/vampi:latest, pushed 2026-04-07 (VAmPI commit f16052d).
+        # Pinned by digest on 2026-10-31 so results cannot change under us.
+        image: erev0s/vampi@sha256:0a5a224b6e14ae7da6a6ea265178ff71286ff903aec74adee98f660bb0e4ca12
+        ports:
+          - 5000:5000
+        env:
+          vulnerable: ${{ matrix.vulnerable }}
+          tokentimetolive: ${{ matrix.token_ttl }}
+
+    env:
+      # VAmPI's public demo passwords, taken from its source code. Not secrets.
+      VAMPI_USER1_PASS: pass1
+      VAMPI_USER2_PASS: pass2
+      VAMPI_ADMIN_PASS: pass1
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Prepare VAmPI (reset database, add one book per user)
+        run: python ci/vampi/setup_vampi.py http://localhost:5000 --expect-vulnerable ${{ matrix.vulnerable }}
+
+      - name: Run api-authz-tester
+        run: |
+          set +e
+          api-authz-tester run -c examples/vampi.config.yml -o report.md --json report.json --rate ${{ matrix.rate }}
+          code=$?
+          set -e
+          # Exit 1 = at least one BYPASSED. Expected in both modes, because
+          # /users/v1/_debug is open on purpose even in VAmPI's secure mode.
+          if [ "$code" -ne 1 ]; then
+            echo "expected exit code 1, got $code"
+            exit 1
+          fi
+
+      - name: Check every verdict
+        run: python ci/vampi/check_report.py report.json ci/vampi/expected-${{ matrix.mode }}.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vampi-${{ matrix.mode }}-report
+          path: |
+            report.md
+            report.json
+          if-no-files-found: ignore
