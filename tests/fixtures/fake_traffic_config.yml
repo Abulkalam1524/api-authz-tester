@@ -1,0 +1,60 @@
+# Config for the fake API in tests/fake_api.py, using recorded traffic
+# instead of an OpenAPI spec. The fixtures were "recorded" on port 8000, so
+# for a manual demo run the fake API with --port 8000 (see the README).
+target:
+  base_url: ${FAKE_API_URL}
+  rate_limit: 1000
+  timeout: 5
+  similarity: 0.9
+
+scope:
+  include: ["/*"]
+  public: ["/public"]
+
+identities:
+  - name: alice
+    privilege: 1
+    login:
+      method: POST
+      path: /login
+      json: { username: alice, password: "${FAKE_ALICE_PASS}" }
+      token_from: token
+      header: Authorization
+      format: "Bearer {token}"
+    owns:
+      username: alice
+      note_id: 1
+
+  - name: bob
+    privilege: 1
+    login:
+      method: POST
+      path: /login
+      json: { username: bob, password: "${FAKE_BOB_PASS}" }
+      token_from: token
+      header: Authorization
+      format: "Bearer {token}"
+    owns:
+      username: bob
+      note_id: 2
+
+  - name: admin
+    privilege: 2
+    login:
+      method: POST
+      path: /login
+      json: { username: admin, password: "${FAKE_ADMIN_PASS}" }
+      token_from: token
+      header: Authorization
+      format: "Bearer {token}"
+    owns:
+      username: admin
+
+  - name: anonymous
+    privilege: 0
+
+traffic:
+  - file: alice.har        # relative to this file
+    owner: alice
+  - file: admin.xml        # Burp Suite "Save items" format
+    owner: admin

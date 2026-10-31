@@ -2,7 +2,7 @@ import json
 
 from api_authz_tester.config import Identity, Login
 from api_authz_tester.engine import Result
-from api_authz_tester.report import REDACTED, curl_command, excerpt, redact
+from api_authz_tester.report import REDACTED, curl_command, display_path, excerpt, redact
 
 
 def test_redacts_auth_headers():
@@ -79,3 +79,29 @@ def test_curl_anonymous_head():
     anon = Identity(name="anonymous", privilege=0)
     result = Result(method="HEAD", path_template="/x", path="/x")
     assert curl_command("http://localhost", result, anon) == "curl -i -I http://localhost/x"
+
+
+def test_redacts_form_encoded_text():
+    assert redact("user=bob&password=hunter2&api_key=k") == (
+        "user=bob&password=[REDACTED]&api_key=[REDACTED]"
+    )
+    assert redact("a=1") == "a=1"
+    assert redact("just some text = here") == "just some text = here"
+
+
+def test_recorded_request_query_and_body_are_redacted():
+    login = Login(path="/login", token_from="token")
+    alice = Identity(name="alice", privilege=1, login=login)
+    result = Result(
+        method="POST",
+        path_template="/login",
+        path="/login?next=/home&access_token=real-query-token",
+        headers={"Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": "real-csrf"},
+        raw_body=b"user=alice&password=real-password",
+    )
+    assert display_path(result) == "/login?next=/home&access_token=[REDACTED]"
+    cmd = curl_command("http://localhost", result, alice)
+    assert "real-" not in cmd
+    assert "'Content-Type: application/x-www-form-urlencoded'" in cmd
+    assert "'X-CSRF-Token: <x-csrf-token>'" in cmd
+    assert "--data-binary 'user=alice&password=[REDACTED]'" in cmd

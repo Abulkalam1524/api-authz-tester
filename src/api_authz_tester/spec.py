@@ -99,16 +99,16 @@ def select_operations(
 
 def in_scope(operations: list[Operation], scope: Scope) -> list[Operation]:
     """Apply include/exclude globs and the methods list (ignores the unsafe filter)."""
-    result = []
-    for op in operations:
-        if not any(fnmatchcase(op.path, pattern) for pattern in scope.include):
-            continue
-        if any(fnmatchcase(op.path, pattern) for pattern in scope.exclude):
-            continue
-        if scope.methods is not None and op.method not in scope.methods:
-            continue
-        result.append(op)
-    return result
+    return [op for op in operations if matches_scope(op.method, op.path, scope)]
+
+
+def matches_scope(method: str, path: str, scope: Scope) -> bool:
+    """True if a path (template or concrete) and method pass include, exclude and methods."""
+    if not any(fnmatchcase(path, pattern) for pattern in scope.include):
+        return False
+    if any(fnmatchcase(path, pattern) for pattern in scope.exclude):
+        return False
+    return scope.methods is None or method in scope.methods
 
 
 def is_public(path: str, scope: Scope) -> bool:

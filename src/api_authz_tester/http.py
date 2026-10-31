@@ -77,6 +77,7 @@ class HttpClient:
         headers: dict[str, str] | None = None,
         params: dict[str, str] | None = None,
         json_body: Any = None,
+        data: bytes | None = None,
     ) -> Response:
         self.limiter.acquire()
         try:
@@ -86,6 +87,7 @@ class HttpClient:
                 headers=headers or {},
                 params=params or None,
                 json=json_body,
+                data=data,
                 timeout=self.timeout,
                 allow_redirects=False,
             )

@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<!DOCTYPE items [
+<!ELEMENT items (item*)>
+<!ATTLIST items burpVersion CDATA "">
+]>
+<!-- Hand-written test fixture in Burp Suite "Save items" format. Fake tokens only. -->
+<items burpVersion="2026.10" exportTime="Sat Oct 31 10:00:00 UTC 2026">
+  <item>
+    <time>Sat Oct 31 10:00:00 UTC 2026</time>
+    <url><![CDATA[http://127.0.0.1:8000/admin/stats]]></url>
+    <host ip="127.0.0.1">127.0.0.1</host>
+    <port>8000</port>
+    <protocol>http</protocol>
+    <method><![CDATA[GET]]></method>
+    <path><![CDATA[/admin/stats]]></path>
+    <extension>null</extension>
+    <request base64="true"><![CDATA[R0VUIC9hZG1pbi9zdGF0cyBIVFRQLzEuMQ0KSG9zdDogMTI3LjAuMC4xOjgwMDANCkF1dGhvcml6YXRpb246IEJlYXJlciByZWNvcmRlZC1hZG1pbi10b2tlbi1tdXN0LW5vdC1iZS1zZW50DQpBY2NlcHQ6IGFwcGxpY2F0aW9uL2pzb24NCg0K]]></request>
+    <status>200</status>
+    <responselength>0</responselength>
+    <mimetype>JSON</mimetype>
+    <response base64="true"><![CDATA[]]></response>
+    <comment></comment>
+  </item>
+  <item>
+    <time>Sat Oct 31 10:00:00 UTC 2026</time>
+    <url><![CDATA[http://127.0.0.1:8000/debug/config]]></url>
+    <host ip="127.0.0.1">127.0.0.1</host>
+    <port>8000</port>
+    <protocol>http</protocol>
+    <method><![CDATA[GET]]></method>
+    <path><![CDATA[/debug/config]]></path>
+    <extension>null</extension>
+    <request base64="false"><![CDATA[GET /debug/config HTTP/1.1
+Host: 127.0.0.1:8000
+Authorization: Bearer recorded-admin-token-must-not-be-sent
+Accept: application/json
+
+]]></request>
+    <status>200</status>
+    <responselength>0</responselength>
+    <mimetype>JSON</mimetype>
+    <response base64="true"><![CDATA[]]></response>
+    <comment></comment>
+  </item>
+</items>

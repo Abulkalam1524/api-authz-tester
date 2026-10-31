@@ -51,22 +51,29 @@ class AuthManager:
         path: str,
         params: dict[str, str] | None = None,
         json_body: Any = None,
+        data: bytes | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> Response:
-        """Send a request as an identity. A login failure becomes an error Response."""
+        """Send a request as an identity. A login failure becomes an error Response.
+
+        `extra_headers` (for example kept from recorded traffic) never override the
+        identity's own auth headers.
+        """
         try:
-            headers = self.headers_for(identity)
+            headers = {**(extra_headers or {}), **self.headers_for(identity)}
         except LoginError as exc:
             return Response(status=None, error=str(exc))
 
-        resp = self.client.send(identity.name, method, path, headers, params, json_body)
+        resp = self.client.send(identity.name, method, path, headers, params, json_body, data)
         if resp.status == 401 and identity.login is not None:
             # The token may have expired (VAmPI tokens last about 60 s). A stale
             # token would look like ENFORCED and hide a real bug, so retry once.
             try:
-                self._headers[identity.name] = headers = self.login(identity)
+                self._headers[identity.name] = self.login(identity)
             except LoginError as exc:
                 return Response(status=None, error=f"re-login after 401: {exc}")
-            resp = self.client.send(identity.name, method, path, headers, params, json_body)
+            headers = {**(extra_headers or {}), **self._headers[identity.name]}
+            resp = self.client.send(identity.name, method, path, headers, params, json_body, data)
         return resp
 
 

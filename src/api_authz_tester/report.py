@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import unquote_plus, urlencode
 
 from . import __version__
 from .compare import Verdict
@@ -17,6 +18,8 @@ REDACTED = "[REDACTED]"
 SENSITIVE_NAMES = {"authorization", "cookie", "set-cookie", "x-api-key"}
 SENSITIVE_PARTS = ("token", "key", "secret", "password")
 EXCERPT_LIMIT = 300
+# name=value&name=value, as in query strings and form bodies
+FORM_PATTERN = re.compile(r"[^=&\s]+=[^&\s]*(&[^=&\s]+=[^&\s]*)*")
 
 
 def is_sensitive(name: str) -> bool:
@@ -25,10 +28,11 @@ def is_sensitive(name: str) -> bool:
 
 
 def redact(value: Any) -> Any:
-    """Hide secret values in headers, JSON data, or a JSON string.
+    """Hide secret values in headers, JSON data, a JSON string or form data.
 
     Dict keys that look secret (see is_sensitive) get their value replaced,
     at any depth. Strings that hold JSON are parsed, redacted and re-dumped.
+    Form-encoded strings (a=1&password=x) get the secret values replaced.
     Other strings are returned unchanged.
     """
     if isinstance(value, dict):
@@ -40,7 +44,17 @@ def redact(value: Any) -> Any:
             return json.dumps(redact(json.loads(value)))
         except ValueError:
             return value
+    if isinstance(value, str) and FORM_PATTERN.fullmatch(value):
+        return _redact_form(value)
     return value
+
+
+def _redact_form(text: str) -> str:
+    pairs = []
+    for pair in text.split("&"):
+        name, _, _ = pair.partition("=")
+        pairs.append(f"{name}={REDACTED}" if is_sensitive(unquote_plus(name)) else pair)
+    return "&".join(pairs)
 
 
 def excerpt(body: str) -> str:
@@ -53,9 +67,12 @@ def excerpt(body: str) -> str:
 
 def display_path(result: Result) -> str:
     """The concrete path with its query string, secrets redacted."""
-    if not result.params:
-        return result.path
-    return result.path + "?" + urlencode(redact(result.params))
+    path, _, query = result.path.partition("?")  # recorded requests keep their query here
+    if query:
+        path += "?" + redact(query)
+    if result.params:
+        path += ("&" if query else "?") + urlencode(redact(result.params))
+    return path
 
 
 def curl_command(base_url: str, result: Result, identity: Identity) -> str:
@@ -71,9 +88,16 @@ def curl_command(base_url: str, result: Result, identity: Identity) -> str:
         if is_sensitive(name):
             value = f"<{identity.name}-{name.lower()}>"
         parts += ["-H", shlex.quote(f"{name}: {value}")]
+    for name, value in result.headers.items():  # kept from recorded traffic
+        if is_sensitive(name):
+            value = f"<{name.lower()}>"
+        parts += ["-H", shlex.quote(f"{name}: {value}")]
     if result.json_body is not None:
         parts += ["-H", shlex.quote("Content-Type: application/json")]
         parts += ["--data", shlex.quote(json.dumps(redact(result.json_body)))]
+    if result.raw_body is not None:
+        text = result.raw_body.decode("utf-8", errors="replace")
+        parts += ["--data-binary", shlex.quote(redact(text))]
     return " ".join(parts)
 
 
@@ -102,6 +126,7 @@ def build_report(
             "path": display_path(result),
             "owner": result.owner,
             "owner_privilege": result.owner_privilege,
+            "source": result.source,
             "baseline_status": result.baseline_status,
             "baseline_excerpt": excerpt(result.baseline_body),
             "skipped_reason": result.skipped_reason,
@@ -185,6 +210,7 @@ def render_markdown(data: dict[str, Any]) -> str:
             f"### {number}. {rep['label']} ({rep['owasp']}): `{row['request']}`",
             "",
             f"- **Endpoint:** `{row['method']} {row['path_template']}`",
+            f"- **Source:** {row['source']}",
             f"- **Owner:** {row['owner']} (privilege {row['owner_privilege']}), "
             f"status {_status(row['baseline_status'])}",
             f"- **Attacker:** {rep['identity']} (privilege {rep['privilege']}), "

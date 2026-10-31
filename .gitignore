@@ -16,3 +16,8 @@ venv/
 
 # generated reports can contain target data
 reports/
+
+# recorded traffic holds real tokens, cookies and passwords
+*.har
+traffic/
+!tests/fixtures/*.har
