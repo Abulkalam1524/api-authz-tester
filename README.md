@@ -13,10 +13,12 @@ It targets the two most common API flaws in the
 | Missing authentication | API2:2023 | Does the endpoint answer with no login at all? |
 
 > **Status:** v0.1. The core engine, CLI and Markdown/JSON reports work. They
-> are tested offline (99 pytest tests) against a small fake vulnerable API in
-> [`tests/fake_api.py`](tests/fake_api.py). The tool has **not** yet been run in
-> CI against a real vulnerable app such as VAmPI; that is the next step. See
-> [Roadmap](#roadmap).
+> are tested offline (106 pytest tests) against a small fake vulnerable API in
+> [`tests/fake_api.py`](tests/fake_api.py), and in CI against
+> [VAmPI](https://github.com/erev0s/VAmPI), a real vulnerable API, in both its
+> vulnerable and secure mode ([results](#results-on-vampi),
+> [workflow runs](https://github.com/Abulkalam1524/api-authz-tester/actions/workflows/vampi.yml)).
+> Findings are not yet confirmed by hand. See [Roadmap](#roadmap).
 
 ## How it works
 
@@ -108,8 +110,10 @@ Design choices:
 - **Safe by default.** Read-only methods, localhost only, rate-limited, secrets redacted.
 - **No hidden bugs from expired tokens.** A 401 triggers one re-login and retry, so
   an expired token is not reported as `ENFORCED`.
-- **Offline tests.** 99 pytest tests run against a fake vulnerable API on
+- **Offline tests.** 106 pytest tests run against a fake vulnerable API on
   `127.0.0.1`, including an end-to-end check of every verdict.
+- **Real-app check in CI.** A second workflow runs the tool against VAmPI and
+  checks every verdict against a file of expected results.
 
 ## Safety
 
@@ -158,6 +162,17 @@ Good to know:
   highest-privilege identity as the owner.
 - Only token login (token read from a JSON response) is supported for now.
 
+### Try it on VAmPI
+
+```bash
+docker run -d -p 5000:5000 -e vulnerable=1 erev0s/vampi:latest   # or vulnerable=0
+export VAMPI_USER1_PASS=pass1 VAMPI_USER2_PASS=pass2 VAMPI_ADMIN_PASS=pass1   # VAmPI's public demo passwords
+python ci/vampi/setup_vampi.py http://localhost:5000      # reset the database, add one book per user
+api-authz-tester run -c examples/vampi.config.yml -o reports/vampi.md
+```
+
+See [Results on VAmPI](#results-on-vampi) for what to expect.
+
 ### Try it on the fake API
 
 ```bash
@@ -205,10 +220,37 @@ Candidate: confirm manually before reporting.
 data is expected.) Secrets in responses are redacted, for example
 `/debug/config` shows `"db_password": "[REDACTED]"`.
 
+## Results on VAmPI
+
+[VAmPI](https://github.com/erev0s/VAmPI) can run with its bugs on
+(`vulnerable=1`) or off (`vulnerable=0`). CI runs the tool against both, with
+[`examples/vampi.config.yml`](examples/vampi.config.yml), and fails if any
+verdict changes.
+
+| Request | Attacker | vulnerable=1 | vulnerable=0 |
+|---|---|---|---|
+| `GET /books/v1/alice-secret-book` | bob | **BYPASSED (BOLA)** | ENFORCED (404) |
+| `GET /books/v1/bob-secret-book` | alice | **BYPASSED (BOLA)** | ENFORCED (404) |
+| `GET /users/v1/_debug` | alice, bob | **BYPASSED (BFLA)** | **BYPASSED (BFLA)** |
+| `GET /users/v1/_debug` | anonymous | **BYPASSED (Missing auth)** | **BYPASSED (Missing auth)** |
+| `GET /me` | alice, bob | REVIEW | REVIEW |
+| `GET /books/v1/...`, `GET /me` | anonymous | ENFORCED (401) | ENFORCED (401) |
+
+- The book BOLA is found when VAmPI is vulnerable and is `ENFORCED` when it is
+  fixed. `/users/v1/_debug` leaks every password and stays open even in
+  VAmPI's secure mode, so `BYPASSED` in both columns is correct.
+- In the vulnerable run, tokens expire every 5 seconds during the scan. The
+  tool logs in again on 401, and the results do not change.
+- `GET /users/v1`, `GET /books/v1` and `GET /users/v1/{username}` are public by
+  design, so they are listed in `scope.public`. Without that list the tool
+  reports 13 false positives on them.
+
+Details, curl commands and known limitations: [docs/vampi-results.md](docs/vampi-results.md).
+
 ## Roadmap
 
 - [x] **Session 1:** core engine, CLI, Markdown/JSON reports, offline test suite ([brief](docs/briefs/session-1-core.md))
-- [ ] **Session 2:** CI that runs the tool against [VAmPI](https://github.com/erev0s/VAmPI)
+- [x] **Session 2:** CI that runs the tool against [VAmPI](https://github.com/erev0s/VAmPI) in vulnerable and secure mode ([brief](docs/briefs/session-2-vampi-ci.md))
 - [ ] **Session 3:** import requests from Burp Suite XML and HAR files
 - [ ] Manual OWASP API Top 10 assessment of [crAPI](https://github.com/OWASP/crAPI), with tool results validated by hand
 

@@ -1,0 +1,63 @@
+{
+  "description": "VAmPI with vulnerable=0: another user's book gives 404. /users/v1/_debug stays open on purpose in VAmPI, even in secure mode.",
+  "cells": [
+    {
+      "request": "GET /books/v1/alice-secret-book",
+      "identity": "bob",
+      "verdict": "ENFORCED"
+    },
+    {
+      "request": "GET /books/v1/alice-secret-book",
+      "identity": "anonymous",
+      "verdict": "ENFORCED"
+    },
+    {
+      "request": "GET /books/v1/bob-secret-book",
+      "identity": "alice",
+      "verdict": "ENFORCED"
+    },
+    {
+      "request": "GET /books/v1/bob-secret-book",
+      "identity": "anonymous",
+      "verdict": "ENFORCED"
+    },
+    {
+      "request": "GET /users/v1/_debug",
+      "identity": "alice",
+      "verdict": "BYPASSED",
+      "label": "BFLA"
+    },
+    {
+      "request": "GET /users/v1/_debug",
+      "identity": "bob",
+      "verdict": "BYPASSED",
+      "label": "BFLA"
+    },
+    {
+      "request": "GET /users/v1/_debug",
+      "identity": "anonymous",
+      "verdict": "BYPASSED",
+      "label": "Missing authentication"
+    },
+    {
+      "request": "GET /me",
+      "identity": "alice",
+      "verdict": "REVIEW"
+    },
+    {
+      "request": "GET /me",
+      "identity": "bob",
+      "verdict": "REVIEW"
+    },
+    {
+      "request": "GET /me",
+      "identity": "anonymous",
+      "verdict": "ENFORCED"
+    }
+  ],
+  "skipped": [
+    "GET /books/v1",
+    "GET /users/v1",
+    "GET /users/v1/{username}"
+  ]
+}

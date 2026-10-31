@@ -1,25 +1,30 @@
-# Example config for VAmPI (https://github.com/erev0s/VAmPI), a deliberately
-# vulnerable API. Run it locally first:
+# Config for VAmPI (https://github.com/erev0s/VAmPI), a deliberately
+# vulnerable API. The VAmPI workflow (.github/workflows/vampi.yml) runs it in CI.
+# To run it yourself:
 #   docker run -d -p 5000:5000 -e vulnerable=1 erev0s/vampi:latest
-#   curl http://localhost:5000/createdb
+#   export VAMPI_USER1_PASS=pass1 VAMPI_USER2_PASS=pass2 VAMPI_ADMIN_PASS=pass1
+#   python ci/vampi/setup_vampi.py http://localhost:5000
+#   api-authz-tester run -c examples/vampi.config.yml -o reports/vampi.md
 #
-# Then, as each user, create a book with a known title (POST /books/v1)
-# so every identity "owns" something the others should not be able to read.
-#
-# ${VAR} values are read from environment variables, so passwords and
-# tokens never end up in this file. Copy it to my.config.yml (gitignored).
+# setup_vampi.py resets the database (/createdb) and gives name1 and name2 one
+# book each with the titles below, so every identity "owns" something the
+# others should not be able to read. The passwords are VAmPI's public demo
+# values; ${VAR} keeps real passwords out of config files in general.
 
 target:
   base_url: http://localhost:5000
-  spec: https://raw.githubusercontent.com/erev0s/VAmPI/master/openapi_specs/openapi3.yml
+  spec: http://localhost:5000/openapi.json   # served by VAmPI itself, so it always matches
   rate_limit: 5          # max requests per second
   timeout: 10            # seconds per request
   similarity: 0.9        # response similarity that counts as "same data"
 
 scope:
-  include: ["/users/v1*", "/books/v1*"]
+  include: ["/users/v1*", "/books/v1*", "/me"]
   exclude: ["/createdb"]
   methods: [GET]         # safe default; state-changing methods need --allow-unsafe
+  # Public by design in VAmPI: anyone may read these. Without this list they
+  # would be reported as BYPASSED, which would be false positives.
+  public: ["/users/v1", "/books/v1", "/users/v1/{username}"]
 
 identities:
   - name: alice
