@@ -13,7 +13,8 @@ from .config import Config, ConfigError, load_config
 from .engine import Engine, possible_owners
 from .http import HttpClient, RateLimiter
 from .report import build_report, console_summary, render_json, render_markdown
-from .spec import SpecError, in_scope, load_spec, select_operations
+from .spec import Operation, SpecError, in_scope, load_spec, select_operations
+from .traffic import TrafficError, load_traffic
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -56,20 +57,36 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "list":
             return cmd_list(config)
         return cmd_run(config, args)
-    except (ConfigError, SpecError) as exc:
+    except (ConfigError, SpecError, TrafficError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
 
 
 def cmd_list(config: Config) -> int:
-    """Print operations and possible owners. Sends no API requests."""
-    operations = in_scope(load_spec(config.target.spec, config.target.timeout), config.scope)
-    print(f"{len(operations)} operations in scope for {config.target.base_url}")
-    for op in operations:
-        owners = ", ".join(i.name for i in possible_owners(op, config.identities)) or "none"
-        note = "" if op.is_safe else "  [unsafe: needs --allow-unsafe]"
-        print(f"  {op.method:<7} {op.path:<40} owners: {owners}{note}")
+    """Print operations, recorded requests and their owners. Sends no API requests."""
+    unsafe = "  [unsafe: needs --allow-unsafe]"
+    if config.target.spec:
+        operations = in_scope(spec_operations(config), config.scope)
+        print(f"{len(operations)} operations in scope for {config.target.base_url}")
+        for op in operations:
+            owners = ", ".join(i.name for i in possible_owners(op, config.identities)) or "none"
+            note = "" if op.is_safe else unsafe
+            print(f"  {op.method:<7} {op.path:<40} owners: {owners}{note}")
+    if config.traffic:
+        recorded, skipped = load_traffic(config)
+        print(f"{len(recorded)} recorded requests in scope from {len(config.traffic)} traffic file(s)")
+        for rec in recorded:
+            note = "" if rec.is_safe else unsafe
+            print(f"  {rec.method:<7} {rec.full_path:<40} owner: {rec.owner} ({rec.source}){note}")
+        if skipped:
+            print("  skipped: " + ", ".join(f"{n} {why}" for why, n in sorted(skipped.items())))
     return EXIT_OK
+
+
+def spec_operations(config: Config) -> list[Operation]:
+    if not config.target.spec:
+        return []
+    return load_spec(config.target.spec, config.target.timeout)
 
 
 def cmd_run(config: Config, args: argparse.Namespace) -> int:
@@ -87,14 +104,16 @@ def cmd_run(config: Config, args: argparse.Namespace) -> int:
         )
         return EXIT_USAGE
 
-    operations = select_operations(
-        load_spec(config.target.spec, config.target.timeout), config.scope, args.allow_unsafe
-    )
+    operations = select_operations(spec_operations(config), config.scope, args.allow_unsafe)
+    recorded = []
+    if config.traffic:
+        recorded, _ = load_traffic(config)
+        recorded = [rec for rec in recorded if rec.is_safe or args.allow_unsafe]
     client = HttpClient(
         config.target.base_url, config.target.timeout, RateLimiter(config.target.rate_limit)
     )
     try:
-        results = Engine(config, AuthManager(config.identities, client)).run(operations)
+        results = Engine(config, AuthManager(config.identities, client)).run(operations, recorded)
     finally:
         client.close()
 

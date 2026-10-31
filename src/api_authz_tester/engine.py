@@ -11,6 +11,7 @@ from .compare import Verdict, baseline_problem, judge, label
 from .config import Config, Identity
 from .http import Response
 from .spec import Operation, is_public
+from .traffic import RecordedRequest
 
 
 @dataclass
@@ -30,13 +31,17 @@ class Replay:
 
 @dataclass
 class Result:
-    """One concrete request (an operation with one owner's values filled in)."""
+    """One concrete request: an operation with one owner's values filled in,
+    or a recorded request with the owner from the config."""
 
     method: str
     path_template: str
     path: str
     params: dict[str, str] = field(default_factory=dict)
     json_body: Any = None
+    headers: dict[str, str] = field(default_factory=dict)  # kept from recorded traffic
+    raw_body: bytes | None = None  # recorded body, sent as is
+    source: str = "openapi"
     owner: str | None = None
     owner_privilege: int | None = None
     baseline_status: int | None = None
@@ -70,10 +75,14 @@ class Engine:
         self.config = config
         self.auth = auth
 
-    def run(self, operations: list[Operation]) -> list[Result]:
+    def run(
+        self, operations: list[Operation], recorded: list[RecordedRequest] | None = None
+    ) -> list[Result]:
         results: list[Result] = []
         for op in operations:
             results.extend(self.test_operation(op))
+        for rec in recorded or []:
+            results.append(self.test_recorded(rec))
         return results
 
     def test_operation(self, op: Operation) -> list[Result]:
@@ -99,9 +108,29 @@ class Engine:
             path=build_path(op.path, {p: owner.owns[p] for p in op.path_params}),
             params={q: owner.owns[q] for q in op.query_params},
             json_body=op.example_body,
-            owner=owner.name,
-            owner_privilege=owner.privilege,
         )
+        return self.replay(result, owner)
+
+    def test_recorded(self, rec: RecordedRequest) -> Result:
+        """Replay one recorded request. The recorded auth was already dropped."""
+        result = Result(
+            method=rec.method,
+            path_template=rec.path,
+            path=rec.full_path,
+            headers=rec.headers,
+            raw_body=rec.body,
+            source=rec.source,
+        )
+        if is_public(rec.path, self.config.scope):
+            result.skipped_reason = "public endpoint (scope.public)"
+            return result
+        owner = next(ident for ident in self.config.identities if ident.name == rec.owner)
+        return self.replay(result, owner)
+
+    def replay(self, result: Result, owner: Identity) -> Result:
+        """Send the baseline as the owner, then as every allowed attacker, and judge."""
+        result.owner = owner.name
+        result.owner_privilege = owner.privilege
         baseline = self._send(owner, result)
         result.baseline_status = baseline.status
         result.baseline_body = baseline.body
@@ -135,5 +164,11 @@ class Engine:
 
     def _send(self, identity: Identity, result: Result) -> Response:
         return self.auth.send_as(
-            identity, result.method, result.path, params=result.params, json_body=result.json_body
+            identity,
+            result.method,
+            result.path,
+            params=result.params,
+            json_body=result.json_body,
+            data=result.raw_body,
+            extra_headers=result.headers,
         )

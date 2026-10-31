@@ -40,7 +40,7 @@ class Identity:
 @dataclass
 class Target:
     base_url: str
-    spec: str
+    spec: str | None = None
     rate_limit: float = 5.0
     timeout: float = 10.0
     similarity: float = 0.9
@@ -55,10 +55,20 @@ class Scope:
 
 
 @dataclass
+class TrafficFile:
+    """A recorded traffic file (HAR or Burp XML) and the identity that recorded it."""
+
+    file: str
+    owner: str
+    format: str  # "har" or "burp"
+
+
+@dataclass
 class Config:
     target: Target
     scope: Scope
     identities: list[Identity]
+    traffic: list[TrafficFile] = field(default_factory=list)
 
 
 def load_config(path: str | Path) -> Config:
@@ -74,10 +84,13 @@ def load_config(path: str | Path) -> Config:
     data = expand_env(raw, "")
     config = parse_config(data)
 
-    # A relative spec path is relative to the config file, not the shell.
+    # Relative spec and traffic paths are relative to the config file, not the shell.
     spec = config.target.spec
-    if not spec.startswith(("http://", "https://")) and not Path(spec).is_absolute():
+    if spec and not spec.startswith(("http://", "https://")) and not Path(spec).is_absolute():
         config.target.spec = str(path.parent / spec)
+    for entry in config.traffic:
+        if not Path(entry.file).is_absolute():
+            entry.file = str(path.parent / entry.file)
     return config
 
 
@@ -101,7 +114,7 @@ def expand_env(value: Any, where: str) -> Any:
 def parse_config(data: Any) -> Config:
     """Validate the expanded YAML data and build the dataclasses."""
     data = _mapping(data, "config")
-    _no_unknown(data, "", {"target", "scope", "identities"})
+    _no_unknown(data, "", {"target", "scope", "identities", "traffic"})
     target = _parse_target(_mapping(data.get("target"), "target"))
     scope = _parse_scope(_mapping(data.get("scope") or {}, "scope"))
 
@@ -115,7 +128,14 @@ def parse_config(data: Any) -> Config:
         if ident.name in seen:
             raise ConfigError(f"identities[{i}].name: duplicate identity name {ident.name!r}")
         seen.add(ident.name)
-    return Config(target=target, scope=scope, identities=identities)
+
+    raw_traffic = data.get("traffic") or []
+    if not isinstance(raw_traffic, list):
+        raise ConfigError("traffic: must be a list")
+    traffic = [_parse_traffic(item, f"traffic[{i}]", seen) for i, item in enumerate(raw_traffic)]
+    if target.spec is None and not traffic:
+        raise ConfigError("target.spec: needed unless the config has a traffic list")
+    return Config(target=target, scope=scope, identities=identities, traffic=traffic)
 
 
 def _parse_target(data: dict[str, Any]) -> Target:
@@ -125,7 +145,9 @@ def _parse_target(data: dict[str, Any]) -> Target:
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ConfigError(f"target.base_url: must be an http(s) URL (got {base_url!r})")
 
-    target = Target(base_url=base_url.rstrip("/"), spec=_string(data.get("spec"), "target.spec"))
+    target = Target(base_url=base_url.rstrip("/"))
+    if "spec" in data:
+        target.spec = _string(data["spec"], "target.spec")
     target.rate_limit = _number(data.get("rate_limit", target.rate_limit), "target.rate_limit")
     target.timeout = _number(data.get("timeout", target.timeout), "target.timeout")
     target.similarity = _number(data.get("similarity", target.similarity), "target.similarity")
@@ -194,6 +216,26 @@ def _parse_login(data: dict[str, Any], where: str) -> Login:
     if data.get("json") is not None:
         login.json = _mapping(data["json"], f"{where}.json")
     return login
+
+
+def _parse_traffic(data: Any, where: str, identity_names: set[str]) -> TrafficFile:
+    data = _mapping(data, where)
+    _no_unknown(data, where, {"file", "owner", "format"})
+    file = _string(data.get("file"), f"{where}.file")
+    owner = _string(data.get("owner"), f"{where}.owner")
+    if owner not in identity_names:
+        raise ConfigError(f"{where}.owner: no identity named {owner!r}")
+    if "format" in data:
+        fmt = _string(data["format"], f"{where}.format")
+    elif file.lower().endswith(".har"):
+        fmt = "har"
+    elif file.lower().endswith(".xml"):
+        fmt = "burp"
+    else:
+        raise ConfigError(f"{where}.format: cannot guess from the file name, use har or burp")
+    if fmt not in ("har", "burp"):
+        raise ConfigError(f"{where}.format: must be har or burp (got {fmt!r})")
+    return TrafficFile(file=file, owner=owner, format=fmt)
 
 
 def _join(where: str, key: str) -> str:

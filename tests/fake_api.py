@@ -57,6 +57,7 @@ class FakeState:
     tokens: dict[str, dict] = field(default_factory=dict)  # token -> {user, uses_left}
     login_count: dict[str, int] = field(default_factory=dict)
     requests: list[tuple[str, str]] = field(default_factory=list)  # (method, path)
+    headers_seen: list[dict[str, str]] = field(default_factory=list)  # headers of every request
     expire_first_token_for: str = "bob"
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -80,6 +81,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         with self.state.lock:
             self.state.requests.append((method, path))
+            self.state.headers_seen.append(dict(self.headers))
         parts = path.strip("/").split("/")
 
         if method == "POST" and path == "/login":

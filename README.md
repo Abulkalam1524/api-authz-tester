@@ -12,8 +12,9 @@ It targets the two most common API flaws in the
 | BFLA | API5:2023 | Can a normal user call an admin-only function? |
 | Missing authentication | API2:2023 | Does the endpoint answer with no login at all? |
 
-> **Status:** v0.1. The core engine, CLI and Markdown/JSON reports work. They
-> are tested offline (106 pytest tests) against a small fake vulnerable API in
+> **Status:** v0.1. The core engine, CLI and Markdown/JSON reports work. It
+> reads endpoints from an OpenAPI spec or from recorded traffic (Burp XML or
+> HAR). Everything is tested offline (145 pytest tests) against a small fake vulnerable API in
 > [`tests/fake_api.py`](tests/fake_api.py), and in CI against
 > [VAmPI](https://github.com/erev0s/VAmPI), a real vulnerable API, in both its
 > vulnerable and secure mode ([results](#results-on-vampi),
@@ -22,7 +23,8 @@ It targets the two most common API flaws in the
 
 ## How it works
 
-1. Read the API's **OpenAPI spec** to get every endpoint in scope.
+1. Read the API's **OpenAPI spec**, or **recorded traffic** from Burp Suite or the
+   browser, to get every request in scope.
 2. Log in as each **identity** in the config (for example alice, bob, admin, anonymous).
 3. For each endpoint, send the request as the identity that **owns** the object.
    This is the baseline.
@@ -54,6 +56,7 @@ flowchart TD
     subgraph S2["2. Prepare"]
         CFG["📄 Read the config<br/>config.py<br/>env variables + checks"]
         SPEC["🗺️ Read the endpoints<br/>spec.py<br/>OpenAPI spec + scope"]
+        TRAF["📼 Read recorded traffic<br/>traffic.py<br/>HAR / Burp XML"]
     end
 
     subgraph S3["3. Replay as each identity"]
@@ -75,7 +78,9 @@ flowchart TD
 
     CLI -->|"1. load config"| CFG
     CFG -->|"2. find spec"| SPEC
+    CFG -->|"2. or traffic files"| TRAF
     SPEC -->|"3. operations in scope"| ENG
+    TRAF -->|"3. recorded requests"| ENG
     ENG -->|"4. send as a user"| AUTH
     AUTH -->|"5. add token"| HTTP
     HTTP <-->|"6. request / response"| API
@@ -88,7 +93,7 @@ flowchart TD
     classDef target fill:#dc2626,stroke:#991b1b,color:#ffffff
     classDef output fill:#16a34a,stroke:#166534,color:#ffffff
     class CLI start
-    class CFG,SPEC,ENG,AUTH,HTTP,CMP,REP step
+    class CFG,SPEC,TRAF,ENG,AUTH,HTTP,CMP,REP step
     class API target
     class OUT output
 ```
@@ -98,6 +103,7 @@ flowchart TD
 | `cli.py` | Reads the command, applies the safety checks, starts everything, sets the exit code |
 | `config.py` | Loads the YAML config, fills `${VAR}` from the environment, checks every field |
 | `spec.py` | Reads the OpenAPI spec and keeps the endpoints in scope |
+| `traffic.py` | Reads recorded traffic (HAR, Burp XML), drops the recorded auth, keeps requests in scope |
 | `engine.py` | Picks the owner and the attackers for each request and collects the results |
 | `auth.py` | Logs in once per identity, keeps the token, logs in again once on a 401 |
 | `http.py` | Sends requests: one session per identity, rate limit, timeout, no redirects |
@@ -110,7 +116,9 @@ Design choices:
 - **Safe by default.** Read-only methods, localhost only, rate-limited, secrets redacted.
 - **No hidden bugs from expired tokens.** A 401 triggers one re-login and retry, so
   an expired token is not reported as `ENFORCED`.
-- **Offline tests.** 106 pytest tests run against a fake vulnerable API on
+- **Recorded auth is never replayed.** Tokens and cookies in recorded traffic are
+  dropped; every request is sent with the identities from the config.
+- **Offline tests.** 145 pytest tests run against a fake vulnerable API on
   `127.0.0.1`, including an end-to-end check of every verdict.
 - **Real-app check in CI.** A second workflow runs the tool against VAmPI and
   checks every verdict against a file of expected results.
@@ -139,7 +147,7 @@ api-authz-tester run  -c my.config.yml -o reports/run.md --json reports/run.json
 |---|---|
 | `-o FILE` | write the Markdown report |
 | `--json FILE` | write the JSON report |
-| `--allow-unsafe` | also send POST/PUT/PATCH/DELETE (only if the spec has a JSON example body) |
+| `--allow-unsafe` | also send POST/PUT/PATCH/DELETE (spec: only with a JSON example body; traffic: the recorded body) |
 | `--rate N` | max requests per second (overrides `rate_limit`) |
 | `--i-am-authorized` | needed when `base_url` is not `localhost` / `127.0.0.1` / `::1` |
 
@@ -147,7 +155,8 @@ Exit codes: `0` no BYPASSED, `1` at least one BYPASSED, `2` config or usage erro
 
 See [`examples/vampi.config.yml`](examples/vampi.config.yml) for a full config.
 In short: `target` (URL, OpenAPI spec file or URL, rate limit, timeout,
-similarity threshold), `scope` (`include` / `exclude` / `public` path globs and
+similarity threshold), `traffic` (recorded files and who recorded them, see
+below), `scope` (`include` / `exclude` / `public` path globs and
 `methods`), and `identities` (name, privilege, `login` or `headers`, and `owns`:
 the parameter values that belong to that identity). `${VAR}` is read from the
 environment.
@@ -161,6 +170,40 @@ Good to know:
 - An endpoint with no parameters (like `/admin/stats`) uses the
   highest-privilege identity as the owner.
 - Only token login (token read from a JSON response) is supported for now.
+
+### Use recorded traffic (Burp Suite or HAR)
+
+No OpenAPI spec? Record the app while you use it as one user, then let the tool
+replay every request as the other users, like Burp's Autorize extension.
+
+1. Record, logged in as one identity (for example alice):
+   - **Burp Suite:** select the requests in Proxy > HTTP history, right-click,
+     **Save items**, keep "Base64-encode requests and responses" on. This gives an XML file.
+   - **Browser:** DevTools > Network > right-click > **Save all as HAR**.
+2. Say who recorded each file. `spec` is optional when `traffic` is given; with
+   both, both are tested.
+
+   ```yaml
+   traffic:
+     - file: traffic/alice.har    # relative to the config file
+       owner: alice
+     - file: traffic/admin.xml
+       owner: admin               # format comes from .har / .xml, or set format: har|burp
+   ```
+
+3. `api-authz-tester list -c my.config.yml` shows what will be replayed and
+   what was skipped (other hosts, static files like `.js` and `.png`,
+   out-of-scope paths, duplicates).
+
+Each recorded request is sent again as its owner (a fresh baseline; the
+recorded response is not used) and then as every identity with lower or equal
+privilege. Only requests to `target.base_url` are sent.
+
+> **Recorded files contain real tokens, cookies and passwords.** The tool never
+> sends the recorded `Authorization`, `Cookie` or identity headers, and reports
+> redact secrets (also in form bodies like `password=...`). Keep recordings in
+> `traffic/` or name them `*.har`: both are gitignored. The XML is read with
+> Python's standard parser, so only import Burp files you saved yourself.
 
 ### Try it on VAmPI
 
@@ -220,6 +263,18 @@ Candidate: confirm manually before reporting.
 data is expected.) Secrets in responses are redacted, for example
 `/debug/config` shows `"db_password": "[REDACTED]"`.
 
+### Try it on the fake API with recorded traffic
+
+The fixtures `tests/fixtures/alice.har` and `tests/fixtures/admin.xml` were
+"recorded" on port 8000 with fake tokens:
+
+```bash
+python tests/fake_api.py --port 8000 &
+export FAKE_API_URL=http://127.0.0.1:8000
+export FAKE_ALICE_PASS=alice-pass FAKE_BOB_PASS=bob-pass FAKE_ADMIN_PASS=admin-pass
+api-authz-tester run -c tests/fixtures/fake_traffic_config.yml -o reports/traffic.md
+```
+
 ## Results on VAmPI
 
 [VAmPI](https://github.com/erev0s/VAmPI) can run with its bugs on
@@ -251,7 +306,7 @@ Details, curl commands and known limitations: [docs/vampi-results.md](docs/vampi
 
 - [x] **Session 1:** core engine, CLI, Markdown/JSON reports, offline test suite ([brief](docs/briefs/session-1-core.md))
 - [x] **Session 2:** CI that runs the tool against [VAmPI](https://github.com/erev0s/VAmPI) in vulnerable and secure mode ([brief](docs/briefs/session-2-vampi-ci.md))
-- [ ] **Session 3:** import requests from Burp Suite XML and HAR files
+- [x] **Session 3:** import requests from Burp Suite XML and HAR files ([brief](docs/briefs/session-3-traffic-import.md))
 - [ ] Manual OWASP API Top 10 assessment of [crAPI](https://github.com/OWASP/crAPI), with tool results validated by hand
 
 ## License

@@ -67,7 +67,8 @@ def test_missing_file(tmp_path):
         ("name: anonymous", "name: alice", r"identities\[1\]\.name: duplicate identity name"),
         ("privilege: 0", "privilege: high", r"identities\[1\]\.privilege"),
         ("owns:", "ownz:", r"identities\[0\]\.ownz: unknown field"),
-        ("  spec: spec.yml\n", "", r"target\.spec: must be a non-empty string"),
+        ("  spec: spec.yml\n", "", r"target\.spec: needed unless the config has a traffic list"),
+        ("  spec: spec.yml\n", "  spec: ''\n", r"target\.spec: must be a non-empty string"),
     ],
 )
 def test_validation_errors_name_the_field(tmp_path, monkeypatch, old, new, message):
@@ -103,3 +104,42 @@ def test_identities_must_not_be_empty(tmp_path):
     text = BASE.split("identities:")[0] + "identities: []\n"
     with pytest.raises(ConfigError, match="identities: must be a non-empty list"):
         load_config(write(tmp_path, text))
+
+
+TRAFFIC = BASE.replace("  spec: spec.yml\n", "") + """
+traffic:
+  - file: traffic/alice.har
+    owner: alice
+  - file: /abs/admin.xml
+    owner: anonymous
+  - file: other.txt
+    owner: alice
+    format: burp
+"""
+
+
+def test_traffic_without_spec(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALICE_KEY", "k")
+    config = load_config(write(tmp_path, TRAFFIC))
+    assert config.target.spec is None
+    assert [(t.file, t.owner, t.format) for t in config.traffic] == [
+        (str(tmp_path / "traffic" / "alice.har"), "alice", "har"),  # relative to the config
+        ("/abs/admin.xml", "anonymous", "burp"),
+        (str(tmp_path / "other.txt"), "alice", "burp"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "old, new, message",
+    [
+        ("owner: anonymous", "owner: mallory", r"traffic\[1\]\.owner: no identity named 'mallory'"),
+        ("    format: burp\n", "", r"traffic\[2\]\.format: cannot guess from the file name"),
+        ("format: burp", "format: postman", r"traffic\[2\]\.format: must be har or burp"),
+        ("  - file: traffic/alice.har\n", "  - fil: traffic/alice.har\n", r"traffic\[0\]\.fil: unknown field"),
+    ],
+)
+def test_traffic_validation_errors(tmp_path, monkeypatch, old, new, message):
+    monkeypatch.setenv("ALICE_KEY", "k")
+    assert old in TRAFFIC
+    with pytest.raises(ConfigError, match=message):
+        load_config(write(tmp_path, TRAFFIC.replace(old, new)))
